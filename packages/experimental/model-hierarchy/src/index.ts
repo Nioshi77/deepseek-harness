@@ -1,0 +1,105 @@
+/** Harness Host carrier for confirmed adaptive model hierarchies. */
+import type { Context } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-agent'
+import { createAssistantMessage, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+import type {} from '@deepseek-ai/dsh-subagent'
+import type {} from '@deepseek-ai/dsh-tools'
+import type { ObjectJsonSchema } from '@deepseek-ai/dsh-tools'
+import { hierarchyConfig } from './config.ts'
+import type { HierarchyConfig } from './config.ts'
+import { orchestrate, RouteUnavailable } from './controller.ts'
+import type { Receipt, Role } from './controller.ts'
+
+declare module '@deepseek-ai/dsh-agent' {
+  interface AgentOptions {
+    hierarchyRole?: Role
+    hierarchyIntegrate?: boolean
+  }
+}
+declare module '@deepseek-ai/dsh-session' {
+  interface SessionEventMap {
+    /** Controller review evidence bound to one turn and proposal digest. */
+    'hierarchy/receipt': Receipt & { turn: number }
+  }
+}
+
+/** Loader plugin identity. */
+export const name = 'model-hierarchy'
+/** Services required before the hierarchy can intercept a turn. */
+export const inject = ['agents', 'sessions', 'subagents', 'tools']
+/** Editable hierarchy settings. */
+export interface Config extends HierarchyConfig {}
+/** Loader settings schema. */
+export const Config = hierarchyConfig
+
+/** Register root interception and enforced child tool restrictions.
+ * @param ctx - Harness plugin context.
+ * @param config - validated hierarchy settings.
+ */
+export function apply(ctx: Context, config: Config): void {
+  if (config.confirmed && (!config.workers.length || !config.supervisors.length || !config.chief.length)) {
+    throw new Error('A confirmed hierarchy requires worker, supervisor and chief routes')
+  }
+  ctx.effect(() => ctx.tools.guard((exec) => {
+    const options = exec.agent?.options
+    if (options?.hierarchyRole === undefined) return undefined
+    if (['subagent', 'spawn_teammate', 'run_code', 'plugin_manager'].includes(exec.name)) return 'Hierarchy delegation and runtime configuration are controller-owned.'
+    if (options.hierarchyIntegrate) return undefined
+    return config.readTools.includes(exec.name) ? undefined : 'This hierarchy role is read-only. Return a proposal for supervisor integration.'
+  }))
+  ctx.on('agent/pre-step', async ({ agent, messages, step, turn, signal }, next) => {
+    if (!config.enabled || agent.session.header.parentSession !== undefined || agent.options.hierarchyRole !== undefined
+      || step !== 0 || config.disabledProjects.includes(agent.session.header.cwd ?? '')) return next()
+    if (!config.confirmed) throw new Error('Confirm model assignments in the hierarchy header before starting a task')
+    if (messages.some(message => message.content.some(block => block.type !== 'text'))) {
+      throw new Error('Hierarchy currently accepts text tasks only. Disable hierarchy for this project to submit attachments.')
+    }
+    for (const message of messages) agent.session.append('user/message', message, { surfaceOp: 'append' })
+    const task = messages.flatMap(message => message.content.filter(block => block.type === 'text').map(block => block.text)).join('\n')
+    const summary = await orchestrate(config, task, {
+      signal,
+      async receipt(receipt) {
+        agent.session.append('hierarchy/receipt', { ...receipt, turn })
+        await ctx.sessions.flush(agent.session)
+      },
+      async invoke(request) {
+        const preset = request.role === 'worker' ? config.workerPreset : request.role === 'chief' ? config.chiefPreset : config.supervisorPreset
+        const activation = await ctx.subagents.startActivation({
+          provider: 'spawn', label: `Hierarchy: ${request.role}`, delivery: 'caller', signal,
+          request: {
+            parent: agent, agentPreset: preset, maxDepth: 1,
+            prompt: [{ type: 'text', text: request.prompt }],
+            outputSchema: request.schema as ObjectJsonSchema,
+            agentOptions: {
+              provider: request.route.provider, model: request.route.model,
+              ...(request.route.reasoningEffort === undefined ? {} : { reasoningEffort: ReasoningEffortId(request.route.reasoningEffort) }),
+              hierarchyRole: request.role, hierarchyIntegrate: request.integrate,
+            },
+          },
+        })
+        const cancel = () => { void activation.dispose().catch(() => { /* Result/disposal below owns reporting. */ }) }
+        signal.addEventListener('abort', cancel, { once: true })
+        try {
+          if (signal.aborted) { await activation.dispose(); signal.throwIfAborted() }
+          const result = await activation.result
+          signal.throwIfAborted()
+          if (result.stopReason !== 'completed') throw new RouteUnavailable(`Route ${request.route.provider}/${request.route.model}: ${result.stopReason}`)
+          if (result.structured === undefined) throw new Error('Hierarchy child completed without its required structured result')
+          return result.structured
+        } finally {
+          signal.removeEventListener('abort', cancel)
+          await activation.dispose()
+        }
+      },
+    })
+    signal.throwIfAborted()
+    const route = config.supervisors[0]
+    if (route === undefined) throw new Error('Hierarchy completed without a supervisor route')
+    agent.session.append('assistant/message', {
+      turn, step, stream: [],
+      message: createAssistantMessage({ content: [{ type: 'text', text: summary }], source: { provider: route.provider, model: route.model } }),
+    }, { surfaceOp: 'append' })
+    await ctx.sessions.flush(agent.session)
+    return { kind: 'enter', messages: [] }
+  })
+}
