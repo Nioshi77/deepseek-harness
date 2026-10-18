@@ -61,7 +61,12 @@ export async function orchestrate(config: HierarchyConfig, task: string, io: Con
     io.signal.throwIfAborted()
     const outputSchema = providerSchema(z.toJSONSchema(schema))
     if (outputSchema.type !== 'object') throw new Error(`Hierarchy ${role} output schema must be an object`)
-    return schema.parse(await io.invoke({ role, route, prompt, schema: { ...outputSchema, type: 'object' }, integrate }))
+    const output = await io.invoke({ role, route, prompt, schema: { ...outputSchema, type: 'object' }, integrate })
+    const parsed = schema.safeParse(output)
+    if (!parsed.success) {
+      throw new RouteUnavailable(`Route ${route.provider}/${route.model} returned invalid structured output: ${parsed.error.message}`)
+    }
+    return parsed.data
   }
   async function call<T>(role: Role, prompt: string, schema: z.ZodType<T>, integrate = false): Promise<T> {
     const routes = role === 'worker'
@@ -166,7 +171,7 @@ export async function orchestrate(config: HierarchyConfig, task: string, io: Con
     }
     throw new Error('Worker deliberation ended without a decision')
   }
-  const plan = await call('supervisor', `Plan this task. Return independent read-only worker assignments. Flag architecture, security, multiple subsystems, final project/milestone review, or discretionary escalation. User request:\n${task}`, planSchema)
+  const plan = await call('supervisor', `Plan this task. Return independent read-only worker assignments. tasks MUST contain at least one non-empty assignment. Flag architecture, security, multiple subsystems, final project/milestone review, or discretionary escalation. User request:\n${task}`, planSchema)
   let chiefRequired = plan.architecture || plan.security || plan.multipleSubsystems || plan.finalReview || plan.escalate
   if (chiefRequired) {
     const architecture = await call('chief', `Review the proposed plan before execution. Task:\n${task}\nPlan:\n${JSON.stringify(plan)}`, reviewSchema)

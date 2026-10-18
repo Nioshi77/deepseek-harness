@@ -64,6 +64,23 @@ describe('hierarchy controller', () => {
     expect(calls.filter(call => call.prompt.startsWith('Workers require a supervisor decision'))).toHaveLength(1)
   })
 
+  it('tries the next supervisor when a route returns an empty plan', async () => {
+    const settings = config()
+    settings.supervisors.push({ provider: 'paid', model: 'manager-2' })
+    const planCalls: string[] = []
+    await orchestrate(settings, 'fix', {
+      signal: new AbortController().signal, receipt: async () => {},
+      invoke: async (request) => {
+        if (request.prompt.startsWith('Plan this task')) {
+          planCalls.push(request.route.model)
+          return request.route.model === 'manager' ? { ...plan, tasks: [] } : plan
+        }
+        return normalResponse(request)
+      },
+    })
+    expect(planCalls).toEqual(['manager', 'manager-2'])
+  })
+
   it('routes a reported safety risk to the supervisor even with unanimous agreement', async () => {
     const calls: Invocation[] = []
     let assessments = 0
