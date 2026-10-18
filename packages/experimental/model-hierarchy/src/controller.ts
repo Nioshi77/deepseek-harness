@@ -197,7 +197,9 @@ export async function orchestrate(config: HierarchyConfig, task: string, io: Con
     }
     throw new Error('Worker deliberation ended without a decision')
   }
-  const plan = await call('supervisor', `Plan this task. If the request lacks an actionable objective, set needsClarification=true, put one concise user-facing question in clarificationQuestion, and return tasks=[]. Never ask the user from a child agent. Otherwise return at least one independent read-only worker assignment and needsClarification=false. Set answerOnly=true only when the task is informational and must not modify files; set it false when any file, command, or project change may be needed. Flag architecture, security, multiple subsystems, final project/milestone review, or discretionary escalation. User request:\n${task}`, planSchema)
+  const configuredRoutes = [...config.workers, ...config.supervisors, ...config.chief]
+    .map(route => `${route.provider}/${route.model}`).join(', ')
+  const plan = await call('supervisor', `Plan this task. If the request lacks an actionable objective, set needsClarification=true, put one concise user-facing question in clarificationQuestion, and return tasks=[]. Never ask the user from a child agent. Otherwise return at least one independent read-only worker assignment and needsClarification=false. Set answerOnly=true only when the task is informational and must not modify files; set it false when any file, command, or project change may be needed. Flag architecture, security, multiple subsystems, final project/milestone review, or discretionary escalation. When identifying models, report only routes configured for this current turn (${configuredRoutes}); historical session records and inactive routes must not be presented as active participants. User request:\n${task}`, planSchema)
   if (plan.needsClarification) {
     const question = plan.clarificationQuestion.trim()
     return question === '' ? 'Пожалуйста, уточните задачу и ожидаемый результат.' : question
