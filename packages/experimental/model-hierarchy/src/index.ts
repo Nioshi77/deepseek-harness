@@ -107,7 +107,6 @@ export function apply(ctx: Context, config: Config): void {
       // an already-entered root turn and must not start a second hierarchy.
       || step !== 1 || settings.disabledProjects.includes(agent.session.header.cwd ?? '')) return next()
     if (!settings.confirmed) throw new Error('Confirm model assignments in the hierarchy header before starting a task')
-    for (const message of messages) agent.session.append('user/message', message, { surfaceOp: 'append' })
     const taskText = messages.flatMap(message => message.content.filter(block => block.type === 'text').map(block => block.text)).join('\n')
     const attachments = messages.flatMap(message => message.content.filter(block => block.type !== 'text'))
     const meaningfulText = taskText.match(/[\p{L}\p{N}]/gu)?.join('') ?? ''
