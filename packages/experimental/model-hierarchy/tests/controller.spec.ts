@@ -5,7 +5,23 @@ import type { Invocation, Receipt } from '../src/controller.ts'
 
 const plan = { tasks: ['inspect change'], architecture: false, security: false, multipleSubsystems: false, finalReview: false, escalate: false }
 const approved = { approved: true, feedback: '', escalate: false }
-const config = () => hierarchyConfig({ confirmed: true, workers: [{ provider: 'free', model: 'worker', free: true }], supervisors: [{ provider: 'paid', model: 'manager' }], chief: [{ provider: 'paid', model: 'chief' }] })
+const config = () => {
+  const live = hierarchyConfig({
+    confirmed: true,
+    workers: [{ provider: 'free', model: 'worker', free: true }],
+    supervisors: [{ provider: 'paid', model: 'manager' }],
+    chief: [{ provider: 'paid', model: 'chief' }],
+  })
+  return {
+    ...live,
+    enabled: live.enabled.get(),
+    confirmed: live.confirmed.get(),
+    workers: live.workers.get(),
+    supervisors: live.supervisors.get(),
+    chief: live.chief.get(),
+    disabledProjects: live.disabledProjects.get(),
+  }
+}
 
 describe('hierarchy controller', () => {
   it('plans, delegates and reviews before integration', async () => {
