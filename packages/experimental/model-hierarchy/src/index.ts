@@ -5,6 +5,7 @@ import { createAssistantMessage, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-subagent'
 import type {} from '@deepseek-ai/dsh-tools'
 import type { ObjectJsonSchema } from '@deepseek-ai/dsh-tools'
+import { appendPluginRecord } from '@deepseek-ai/dsh-session'
 import { hierarchyConfig } from './config.ts'
 import type { HierarchyConfig } from './config.ts'
 import { orchestrate, RouteUnavailable } from './controller.ts'
@@ -17,9 +18,9 @@ declare module '@deepseek-ai/dsh-agent' {
   }
 }
 declare module '@deepseek-ai/dsh-session' {
-  interface SessionEventMap {
-    /** Controller review evidence bound to one turn and proposal digest. */
-    'hierarchy/receipt': Receipt & { turn: number }
+  interface PluginRecordMap {
+    /** Ignorable controller evidence bound to one turn and proposal digest. */
+    'plugin:model-hierarchy/receipt': Receipt & { turn: number }
   }
 }
 
@@ -74,12 +75,13 @@ export function apply(ctx: Context, config: Config): void {
     if (!settings.confirmed) throw new Error('Confirm model assignments in the hierarchy header before starting a task')
     for (const message of messages) agent.session.append('user/message', message, { surfaceOp: 'append' })
     const taskText = messages.flatMap(message => message.content.filter(block => block.type === 'text').map(block => block.text)).join('\n')
-    const task = taskText.trim() === '' ? 'Analyze the attached user content.' : taskText
     const attachments = messages.flatMap(message => message.content.filter(block => block.type !== 'text'))
+    if (attachments.length === 0 && !/[\p{L}\p{N}]/u.test(taskText)) return next()
+    const task = taskText.trim() === '' ? 'Analyze the attached user content.' : taskText
     const summary = await orchestrate(settings, task, {
       signal,
       async receipt(receipt) {
-        agent.session.append('hierarchy/receipt', { ...receipt, turn })
+        appendPluginRecord(agent.session, 'plugin:model-hierarchy/receipt', { ...receipt, turn })
         await ctx.sessions.flush(agent.session)
       },
       async invoke(request) {
