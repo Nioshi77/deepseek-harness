@@ -44,6 +44,7 @@ describe('hierarchy controller', () => {
     expect(calls.filter(call => call.prompt.startsWith('Independently inspect this assignment')).map(call => call.route.model)).toEqual(['worker-1', 'worker-2'])
     expect(calls.filter(call => call.prompt.startsWith('Compare every candidate'))).toHaveLength(2)
     expect(calls.some(call => call.prompt.startsWith('Workers require a supervisor decision'))).toBe(false)
+    expect(JSON.stringify(calls.map(call => call.schema))).not.toMatch(/\$schema|minItems|maxItems|minLength/)
     expect(receipts.filter(receipt => receipt.role === 'worker')).toHaveLength(2)
     expect(receipts.every(receipt => /^[a-f0-9]{64}$/.test(receipt.digest))).toBe(true)
   })

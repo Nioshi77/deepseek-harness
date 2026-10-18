@@ -59,7 +59,7 @@ export class RouteUnavailable extends Error {}
 export async function orchestrate(config: HierarchyConfig, task: string, io: ControllerIO): Promise<string> {
   async function callRoute<T>(role: Role, route: Route, prompt: string, schema: z.ZodType<T>, integrate = false): Promise<T> {
     io.signal.throwIfAborted()
-    const outputSchema = z.toJSONSchema(schema)
+    const outputSchema = providerSchema(z.toJSONSchema(schema))
     if (outputSchema.type !== 'object') throw new Error(`Hierarchy ${role} output schema must be an object`)
     return schema.parse(await io.invoke({ role, route, prompt, schema: { ...outputSchema, type: 'object' }, integrate }))
   }
@@ -220,3 +220,22 @@ export async function orchestrate(config: HierarchyConfig, task: string, io: Con
 
 function digest(text: string): string { return createHash('sha256').update(text).digest('hex') }
 function errorMessage(error: unknown): string { return error instanceof Error ? error.message : String(error) }
+
+/** Keep structured-output schemas inside the subset shared by Harness providers. */
+function providerSchema(value: unknown): Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return {}
+  const source = value as Record<string, unknown>
+  const result: Record<string, unknown> = {}
+  for (const [key, child] of Object.entries(source)) {
+    if (key === 'properties' && child !== null && typeof child === 'object' && !Array.isArray(child)) {
+      result[key] = Object.fromEntries(Object.entries(child).map(([name, property]) => [name, providerSchema(property)]))
+    } else if (key === 'items') {
+      result[key] = providerSchema(child)
+    } else if (key === 'oneOf' && Array.isArray(child)) {
+      result[key] = child.map(providerSchema)
+    } else if (['type', 'required', 'additionalProperties', 'enum', 'const', 'title', 'description'].includes(key)) {
+      result[key] = child
+    }
+  }
+  return result
+}
