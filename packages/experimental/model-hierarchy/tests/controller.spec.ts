@@ -16,10 +16,10 @@ const config = () => {
     ...live,
     enabled: live.enabled.get(),
     confirmed: live.confirmed.get(),
-    workers: live.workers.get(),
-    supervisors: live.supervisors.get(),
-    chief: live.chief.get(),
-    disabledProjects: live.disabledProjects.get(),
+    workers: [...live.workers.get()],
+    supervisors: [...live.supervisors.get()],
+    chief: [...live.chief.get()],
+    disabledProjects: [...live.disabledProjects.get()],
   }
 }
 
