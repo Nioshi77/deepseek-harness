@@ -68,7 +68,9 @@ export function apply(ctx: Context, config: Config): void {
   ctx.on('agent/pre-step', async ({ agent, messages, step, turn, signal }, next) => {
     const settings = currentConfig()
     if (!settings.enabled || agent.session.header.parentSession !== undefined || agent.options.hierarchyRole !== undefined
-      || step !== 0 || settings.disabledProjects.includes(agent.session.header.cwd ?? '')) return next()
+      // Harness numbers the first proposed model step as 1. Later steps belong to
+      // an already-entered root turn and must not start a second hierarchy.
+      || step !== 1 || settings.disabledProjects.includes(agent.session.header.cwd ?? '')) return next()
     if (!settings.confirmed) throw new Error('Confirm model assignments in the hierarchy header before starting a task')
     if (messages.some(message => message.content.some(block => block.type !== 'text'))) {
       throw new Error('Hierarchy currently accepts text tasks only. Disable hierarchy for this project to submit attachments.')
