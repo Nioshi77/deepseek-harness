@@ -10,6 +10,7 @@ const planSchema = z.object({
   multipleSubsystems: z.boolean(),
   finalReview: z.boolean(),
   escalate: z.boolean(),
+  answerOnly: z.boolean().default(false),
   needsClarification: z.boolean().default(false),
   clarificationQuestion: z.string().default(''),
 }).refine(plan => plan.needsClarification || plan.tasks.length > 0, {
@@ -181,7 +182,7 @@ export async function orchestrate(config: HierarchyConfig, task: string, io: Con
     }
     throw new Error('Worker deliberation ended without a decision')
   }
-  const plan = await call('supervisor', `Plan this task. If the request lacks an actionable objective, set needsClarification=true, put one concise user-facing question in clarificationQuestion, and return tasks=[]. Never ask the user from a child agent. Otherwise return at least one independent read-only worker assignment and needsClarification=false. Flag architecture, security, multiple subsystems, final project/milestone review, or discretionary escalation. User request:\n${task}`, planSchema)
+  const plan = await call('supervisor', `Plan this task. If the request lacks an actionable objective, set needsClarification=true, put one concise user-facing question in clarificationQuestion, and return tasks=[]. Never ask the user from a child agent. Otherwise return at least one independent read-only worker assignment and needsClarification=false. Set answerOnly=true only when the task is informational and must not modify files; set it false when any file, command, or project change may be needed. Flag architecture, security, multiple subsystems, final project/milestone review, or discretionary escalation. User request:\n${task}`, planSchema)
   if (plan.needsClarification) {
     const question = plan.clarificationQuestion.trim()
     return question === '' ? 'Пожалуйста, уточните задачу и ожидаемый результат.' : question
@@ -229,6 +230,7 @@ export async function orchestrate(config: HierarchyConfig, task: string, io: Con
       await io.receipt({ role: 'chief', digest: digest(artifact), approved: chief.approved, feedback: chief.feedback })
       if (!chief.approved) { feedback = chief.feedback; continue }
     }
+    if (plan.answerOnly) return `${artifact}\n\nРуководитель проверил ответ; изменения файлов не выполнялись.`
     const integrated = await call('supervisor', `Integrate only these approved proposals. Preserve unrelated user changes. Run checks appropriate to the change. Report completed=false if integration or verification fails. Task:\n${task}\nApproved proposals SHA256 ${digest(artifact)}:\n${artifact}`, integrationSchema, true)
     if (!integrated.completed) throw new Error(`Integration incomplete: ${integrated.summary}\n${integrated.verification}`)
     const acceptance = await call('supervisor', `Independently inspect the actual integrated files and verify the task is complete. Do not edit. Task:\n${task}\nApproved proposals:\n${artifact}\nReported verification:\n${integrated.verification}`, reviewSchema)

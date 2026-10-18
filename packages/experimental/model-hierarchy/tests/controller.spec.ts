@@ -5,7 +5,7 @@ import type { Invocation, Receipt } from '../src/controller.ts'
 
 const plan = {
   tasks: ['inspect change'], architecture: false, security: false, multipleSubsystems: false,
-  finalReview: false, escalate: false, needsClarification: false, clarificationQuestion: '',
+  finalReview: false, escalate: false, needsClarification: false, clarificationQuestion: '', answerOnly: false,
 }
 const approved = { approved: true, feedback: '', escalate: false }
 const agreed = (selectedId = 'P1', safetyRisk = '') => ({ selectedId, agreed: true, rationale: 'best production choice', objections: [], safetyRisk })
@@ -96,6 +96,20 @@ describe('hierarchy controller', () => {
     expect(result).toBe('Что именно нужно сделать?')
     expect(calls).toHaveLength(1)
     expect(calls[0]?.role).toBe('supervisor')
+  })
+
+  it('returns approved answer-only work without mutation integration', async () => {
+    const calls: Invocation[] = []
+    const result = await orchestrate(config(), 'answer', {
+      signal: new AbortController().signal, receipt: async () => {},
+      invoke: async (request) => {
+        calls.push(request)
+        if (request.prompt.startsWith('Plan this task')) return { ...plan, answerOnly: true }
+        return normalResponse(request)
+      },
+    })
+    expect(result).toContain('изменения файлов не выполнялись')
+    expect(calls.some(call => call.integrate)).toBe(false)
   })
 
   it('routes a reported safety risk to the supervisor even with unanimous agreement', async () => {
