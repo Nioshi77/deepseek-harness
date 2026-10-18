@@ -154,8 +154,57 @@ describe('hierarchy controller', () => {
         if (request.prompt.startsWith('Review these worker proposals')) return rejected
         return normalResponse(request)
       },
-    })).rejects.toThrow('attempt limit')
+    })).resolves.toContain('Задача не выполнена')
     expect(calls.some(call => call.role === 'chief')).toBe(true)
+    expect(calls.some(call => call.integrate)).toBe(false)
+  })
+
+  it('feeds a candidate rejection back to workers and integrates only the repaired proposal', async () => {
+    const calls: Invocation[] = [], receipts: Receipt[] = []
+    let selections = 0
+    const result = await orchestrate(config(1), 'list participating models', {
+      signal: new AbortController().signal,
+      receipt: async (receipt) => { receipts.push(receipt) },
+      invoke: async (request) => {
+        calls.push(request)
+        if (request.prompt.startsWith('Workers require a supervisor decision') && ++selections === 1) {
+          return { selectedId: 'P1', approved: false, rationale: 'include every active model', escalate: false }
+        }
+        if (request.prompt.startsWith('Independently inspect this assignment')) {
+          return { proposal: selections === 0 ? 'incorrect first answer' : 'corrected complete answer' }
+        }
+        return normalResponse(request)
+      },
+    })
+    expect(result).toContain('done')
+    const workers = calls.filter(call => call.prompt.startsWith('Independently inspect this assignment'))
+    expect(workers).toHaveLength(2)
+    expect(workers[1]?.prompt).toContain('include every active model')
+    const integrations = calls.filter(call => call.integrate)
+    expect(integrations).toHaveLength(1)
+    expect(integrations[0]?.prompt).toContain('corrected complete answer')
+    expect(integrations[0]?.prompt).not.toContain('incorrect first answer')
+    expect(receipts.some(receipt => receipt.role === 'supervisor' && !receipt.approved)).toBe(true)
+  })
+
+  it('escalates two candidate rejections and returns an honest blocked result without integration', async () => {
+    const calls: Invocation[] = []
+    const settings = { ...config(1), maxAttempts: 2 }
+    const result = await orchestrate(settings, 'fix', {
+      signal: new AbortController().signal, receipt: async () => {},
+      invoke: async (request) => {
+        calls.push(request)
+        if (request.prompt.startsWith('Workers require a supervisor decision')) {
+          return { selectedId: 'P1', approved: false, rationale: 'missing evidence', escalate: false }
+        }
+        if (request.role === 'chief') return { approved: false, feedback: 'cannot approve without evidence', escalate: false }
+        return normalResponse(request)
+      },
+    })
+    expect(result).toContain('Задача не выполнена')
+    expect(result).toContain('cannot approve without evidence')
+    expect(calls.filter(call => call.prompt.startsWith('Workers require a supervisor decision'))).toHaveLength(2)
+    expect(calls.filter(call => call.role === 'chief')).toHaveLength(1)
     expect(calls.some(call => call.integrate)).toBe(false)
   })
 

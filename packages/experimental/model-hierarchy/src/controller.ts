@@ -55,6 +55,11 @@ export interface ControllerIO {
 /** Provider failure eligible for the next confirmed route, never a quality rejection. */
 export class RouteUnavailable extends Error {}
 
+/** Read-only candidate rejection can be repaired within the quality attempt budget. */
+class CandidateRejected extends Error {
+  constructor(message: string, readonly artifact: string) { super(message) }
+}
+
 /** Execute a bounded hierarchy and return the reviewed final summary.
  * @param config - confirmed routes and limits.
  * @param task - complete user request.
@@ -134,7 +139,7 @@ export async function orchestrate(config: HierarchyConfig, task: string, io: Con
       await io.receipt({ role: 'supervisor', digest: digest(proposalText), approved: decision.approved, feedback: JSON.stringify({ selectedId: decision.selectedId, rationale: decision.rationale }) })
       chiefRequired ||= decision.escalate || risks.length > 0
       const selected = proposals.find(proposal => proposal.id === decision.selectedId)
-      if (!decision.approved || !selected) throw new Error(`Supervisor rejected worker candidates: ${decision.rationale}`)
+      if (!decision.approved || !selected) throw new CandidateRejected(`Supervisor rejected worker candidates: ${decision.rationale}`, proposalText)
       return { proposal: selected.proposal }
     }
     if (proposals.length === 1) return supervisorSelect('only one worker proposal succeeded')
@@ -191,14 +196,22 @@ export async function orchestrate(config: HierarchyConfig, task: string, io: Con
   let qualityFailures = 0
   for (let attempt = 0; attempt < config.maxAttempts; attempt++) {
     const proposals: string[] = []
-    for (const assignment of plan.tasks) {
-      const candidates = await proposeWithAllWorkers(assignment, feedback)
-      const decision = await selectByWorkerConsensus(assignment, candidates)
-      proposals.push(decision.proposal)
+    let rejection: CandidateRejected | undefined
+    try {
+      for (const assignment of plan.tasks) {
+        const candidates = await proposeWithAllWorkers(assignment, feedback)
+        const decision = await selectByWorkerConsensus(assignment, candidates)
+        proposals.push(decision.proposal)
+      }
+    } catch (error) {
+      if (!(error instanceof CandidateRejected)) throw error
+      rejection = error
     }
-    const artifact = proposals.join('\n\n')
-    const review = await call('supervisor', `Review these worker proposals against the task, check correctness and scope. Do not modify files. Task:\n${task}\nProposals:\n${artifact}`, reviewSchema)
-    await io.receipt({ role: 'supervisor', digest: digest(artifact), approved: review.approved, feedback: review.feedback })
+    const artifact = rejection?.artifact ?? proposals.join('\n\n')
+    const review = rejection
+      ? { approved: false, feedback: rejection.message, escalate: false }
+      : await call('supervisor', `Review these worker proposals against the task, check correctness and scope. Do not modify files. Task:\n${task}\nProposals:\n${artifact}`, reviewSchema)
+    if (!rejection) await io.receipt({ role: 'supervisor', digest: digest(artifact), approved: review.approved, feedback: review.feedback })
     chiefRequired ||= review.escalate
     if (!review.approved) {
       qualityFailures++
@@ -229,7 +242,7 @@ export async function orchestrate(config: HierarchyConfig, task: string, io: Con
     }
     return `${integrated.summary}\n\n${integrated.verification}`
   }
-  throw new Error(`Review attempt limit reached: ${feedback}`)
+  return `Не удалось подготовить одобренный результат за ${config.maxAttempts} попытки. Задача не выполнена; изменения не применялись.\n\nПричина: ${feedback}`
 }
 
 function digest(text: string): string { return createHash('sha256').update(text).digest('hex') }

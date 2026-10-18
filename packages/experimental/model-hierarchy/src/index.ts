@@ -10,6 +10,8 @@ import { hierarchyConfig } from './config.ts'
 import type { HierarchyConfig } from './config.ts'
 import { orchestrate, RouteUnavailable } from './controller.ts'
 import type { Receipt, Role } from './controller.ts'
+import { childFailureCategory, startupFailureCategory } from './diagnostics.ts'
+import type { FailureCategory, InvocationOutcome } from './diagnostics.ts'
 
 declare module '@deepseek-ai/dsh-agent' {
   interface AgentOptions {
@@ -21,6 +23,8 @@ declare module '@deepseek-ai/dsh-session' {
   interface PluginRecordMap {
     /** Ignorable controller evidence bound to one turn and proposal digest. */
     'plugin:model-hierarchy/receipt': Receipt & { turn: number }
+    'plugin:model-hierarchy/invocation': InvocationOutcome
+    'plugin:model-hierarchy/configured': { turn: number; routes: Array<{ role: Role; provider: string; model: string }> }
   }
 }
 
@@ -79,6 +83,13 @@ export function apply(ctx: Context, config: Config): void {
     const meaningfulText = taskText.match(/[\p{L}\p{N}]/gu)?.join('') ?? ''
     if (attachments.length === 0 && meaningfulText.length < 2) return next()
     const task = taskText.trim() === '' ? 'Analyze the attached user content.' : taskText
+    appendPluginRecord(agent.session, 'plugin:model-hierarchy/configured', {
+      turn,
+      routes: (['worker', 'supervisor', 'chief'] as const).flatMap(role => (
+        role === 'worker' ? settings.workers : role === 'supervisor' ? settings.supervisors : settings.chief
+      ).map(route => ({ role, provider: route.provider, model: route.model }))),
+    })
+    let invocation = 0
     const summary = await orchestrate(settings, task, {
       signal,
       async receipt(receipt) {
@@ -86,34 +97,59 @@ export function apply(ctx: Context, config: Config): void {
         await ctx.sessions.flush(agent.session)
       },
       async invoke(request) {
-        const preset = request.role === 'worker'
-          ? settings.workerPreset
-          : request.role === 'chief' ? settings.chiefPreset : settings.supervisorPreset
-        const activation = await ctx.subagents.startActivation({
-          provider: 'spawn', label: `Hierarchy: ${request.role}`, delivery: 'caller', signal,
-          request: {
-            parent: agent, agentPreset: preset, maxDepth: 1,
-            prompt: [{ type: 'text', text: request.prompt }, ...attachments],
-            outputSchema: request.schema as ObjectJsonSchema,
-            agentOptions: {
-              provider: request.route.provider, model: request.route.model,
-              ...(request.route.reasoningEffort === undefined ? {} : { reasoningEffort: ReasoningEffortId(request.route.reasoningEffort) }),
-              hierarchyRole: request.role, hierarchyIntegrate: request.integrate,
-            },
-          },
-        })
-        const cancel = () => { void activation.dispose().catch(() => { /* Result/disposal below owns reporting. */ }) }
-        signal.addEventListener('abort', cancel, { once: true })
+        const evidence = {
+          turn, invocation: ++invocation, role: request.role, provider: request.route.provider, model: request.route.model,
+        }
+        const started = performance.now()
+        appendPluginRecord(agent.session, 'plugin:model-hierarchy/invocation', { ...evidence, state: 'attempted' })
+        let errorCategory: FailureCategory | undefined
+        let accepted = false
         try {
-          if (signal.aborted) { await activation.dispose(); signal.throwIfAborted() }
-          const result = await activation.result
-          signal.throwIfAborted()
-          if (result.stopReason !== 'completed') throw new RouteUnavailable(`Route ${request.route.provider}/${request.route.model}: ${result.stopReason}`)
-          if (result.structured === undefined) throw new Error('Hierarchy child completed without its required structured result')
-          return result.structured
+          const preset = request.role === 'worker'
+            ? settings.workerPreset
+            : request.role === 'chief' ? settings.chiefPreset : settings.supervisorPreset
+          const activation = await ctx.subagents.startActivation({
+            provider: 'spawn', label: `Hierarchy: ${request.role}`, delivery: 'caller', signal,
+            request: {
+              parent: agent, agentPreset: preset, maxDepth: 1,
+              prompt: [{ type: 'text', text: request.prompt }, ...attachments],
+              outputSchema: request.schema as ObjectJsonSchema,
+              agentOptions: {
+                provider: request.route.provider, model: request.route.model,
+                ...(request.route.reasoningEffort === undefined ? {} : {
+                  reasoningEffort: ReasoningEffortId(request.route.reasoningEffort),
+                }),
+                hierarchyRole: request.role, hierarchyIntegrate: request.integrate,
+              },
+            },
+          })
+          accepted = true
+          const cancel = () => { void activation.dispose().catch(() => { /* Result/disposal below owns reporting. */ }) }
+          signal.addEventListener('abort', cancel, { once: true })
+          try {
+            if (signal.aborted) { await activation.dispose(); signal.throwIfAborted() }
+            const result = await activation.result
+            signal.throwIfAborted()
+            errorCategory = childFailureCategory(result.stopReason, result.structured)
+            if (errorCategory !== undefined) throw new Error(`Hierarchy child ${request.role} failed: ${errorCategory}`)
+            return result.structured
+          } finally {
+            signal.removeEventListener('abort', cancel)
+            await activation.dispose()
+          }
+        } catch (error) {
+          errorCategory ??= signal.aborted ? 'cancelled' : accepted ? 'child_error' : startupFailureCategory(error)
+          if (['authentication', 'rate_limit', 'route_unavailable'].includes(errorCategory)) {
+            throw new RouteUnavailable(`Route ${request.route.provider}/${request.route.model}: ${errorCategory}`)
+          }
+          throw error
         } finally {
-          signal.removeEventListener('abort', cancel)
-          await activation.dispose()
+          appendPluginRecord(agent.session, 'plugin:model-hierarchy/invocation', {
+            ...evidence, state: errorCategory === undefined ? 'completed' : 'failed',
+            durationMs: Math.round(performance.now() - started),
+            ...(errorCategory === undefined ? {} : { errorCategory }),
+          })
+          await ctx.sessions.flush(agent.session)
         }
       },
     })

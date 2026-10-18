@@ -213,6 +213,18 @@ describe('hierarchy Host with real child activations', () => {
     await parent.whenIdle()
     expect(adapter.requests.map(request => request.model)).toEqual(['supervisor', 'worker', 'supervisor', 'supervisor', 'supervisor', 'supervisor'])
     const events = parent.session.snapshotEvents()
+    const configured = events.find(event => event.type === 'plugin:model-hierarchy/configured')
+    expect(configured?.data).toMatchObject({ routes: [
+      { role: 'worker', provider: 'test', model: 'worker' },
+      { role: 'supervisor', provider: 'test', model: 'supervisor' },
+      { role: 'chief', provider: 'test', model: 'chief' },
+    ] })
+    const invocations = events.flatMap(event => event.type === 'plugin:model-hierarchy/invocation' ? [event.data] : [])
+    expect(invocations.filter(item => item.state === 'attempted')).toHaveLength(6)
+    expect(invocations.filter(item => item.state === 'completed')).toHaveLength(6)
+    expect(invocations.some(item => item.role === 'chief')).toBe(false)
+    expect(invocations.every(item => !('prompt' in item) && !('output' in item))).toBe(true)
+    expect(invocations.filter(item => item.state === 'completed').every(item => (item.durationMs ?? -1) >= 0)).toBe(true)
     const answer = events.findIndex(event => event.type === 'assistant/message')
     const receipts = events.flatMap((event, index) => event.type === 'plugin:model-hierarchy/receipt' ? [index] : [])
     expect(receipts).toHaveLength(3)
