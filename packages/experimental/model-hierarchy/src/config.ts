@@ -36,12 +36,12 @@ const route = z.object({
 
 /** Loader schema used by the normal Harness settings editor. */
 export const hierarchyConfig: z<HierarchyConfig> = z.object({
-  enabled: z.boolean().default(true),
-  confirmed: z.boolean().default(false),
-  workers: z.array(route).default([]),
-  supervisors: z.array(route).default([]),
-  chief: z.array(route).default([]),
-  disabledProjects: z.array(z.string()).default([]),
+  enabled: z.boolean().default(true).volatile(),
+  confirmed: z.boolean().default(false).volatile(),
+  workers: z.array(route).default([]).volatile(),
+  supervisors: z.array(route).default([]).volatile(),
+  chief: z.array(route).default([]).volatile(),
+  disabledProjects: z.array(z.string()).default([]).volatile(),
   workerPreset: z.string().default('standard'),
   supervisorPreset: z.string().default('standard'),
   chiefPreset: z.string().default('standard'),
