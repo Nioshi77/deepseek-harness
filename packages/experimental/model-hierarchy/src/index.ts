@@ -1,5 +1,5 @@
 /** Harness Host carrier for confirmed adaptive model hierarchies. */
-import type { Context } from '@deepseek-ai/cordis'
+import type { Context, Volatile } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-agent'
 import { createAssistantMessage, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-subagent'
@@ -28,7 +28,15 @@ export const name = 'model-hierarchy'
 /** Services required before the hierarchy can intercept a turn. */
 export const inject = ['agents', 'sessions', 'subagents', 'tools']
 /** Editable hierarchy settings. */
-export interface Config extends HierarchyConfig {}
+export interface Config extends Omit<HierarchyConfig,
+  'enabled' | 'confirmed' | 'workers' | 'supervisors' | 'chief' | 'disabledProjects'> {
+  enabled: Volatile<boolean>
+  confirmed: Volatile<boolean>
+  workers: Volatile<HierarchyConfig['workers']>
+  supervisors: Volatile<HierarchyConfig['supervisors']>
+  chief: Volatile<HierarchyConfig['chief']>
+  disabledProjects: Volatile<string[]>
+}
 /** Loader settings schema. */
 export const Config = hierarchyConfig
 
@@ -37,7 +45,17 @@ export const Config = hierarchyConfig
  * @param config - validated hierarchy settings.
  */
 export function apply(ctx: Context, config: Config): void {
-  if (config.confirmed && (!config.workers.length || !config.supervisors.length || !config.chief.length)) {
+  const currentConfig = (): HierarchyConfig => ({
+    ...config,
+    enabled: config.enabled.get(),
+    confirmed: config.confirmed.get(),
+    workers: config.workers.get(),
+    supervisors: config.supervisors.get(),
+    chief: config.chief.get(),
+    disabledProjects: config.disabledProjects.get(),
+  })
+  const initial = currentConfig()
+  if (initial.confirmed && (!initial.workers.length || !initial.supervisors.length || !initial.chief.length)) {
     throw new Error('A confirmed hierarchy requires worker, supervisor and chief routes')
   }
   ctx.effect(() => ctx.tools.guard((exec) => {
@@ -48,22 +66,25 @@ export function apply(ctx: Context, config: Config): void {
     return config.readTools.includes(exec.name) ? undefined : 'This hierarchy role is read-only. Return a proposal for supervisor integration.'
   }))
   ctx.on('agent/pre-step', async ({ agent, messages, step, turn, signal }, next) => {
-    if (!config.enabled || agent.session.header.parentSession !== undefined || agent.options.hierarchyRole !== undefined
-      || step !== 0 || config.disabledProjects.includes(agent.session.header.cwd ?? '')) return next()
-    if (!config.confirmed) throw new Error('Confirm model assignments in the hierarchy header before starting a task')
+    const settings = currentConfig()
+    if (!settings.enabled || agent.session.header.parentSession !== undefined || agent.options.hierarchyRole !== undefined
+      || step !== 0 || settings.disabledProjects.includes(agent.session.header.cwd ?? '')) return next()
+    if (!settings.confirmed) throw new Error('Confirm model assignments in the hierarchy header before starting a task')
     if (messages.some(message => message.content.some(block => block.type !== 'text'))) {
       throw new Error('Hierarchy currently accepts text tasks only. Disable hierarchy for this project to submit attachments.')
     }
     for (const message of messages) agent.session.append('user/message', message, { surfaceOp: 'append' })
     const task = messages.flatMap(message => message.content.filter(block => block.type === 'text').map(block => block.text)).join('\n')
-    const summary = await orchestrate(config, task, {
+    const summary = await orchestrate(settings, task, {
       signal,
       async receipt(receipt) {
         agent.session.append('hierarchy/receipt', { ...receipt, turn })
         await ctx.sessions.flush(agent.session)
       },
       async invoke(request) {
-        const preset = request.role === 'worker' ? config.workerPreset : request.role === 'chief' ? config.chiefPreset : config.supervisorPreset
+        const preset = request.role === 'worker'
+          ? settings.workerPreset
+          : request.role === 'chief' ? settings.chiefPreset : settings.supervisorPreset
         const activation = await ctx.subagents.startActivation({
           provider: 'spawn', label: `Hierarchy: ${request.role}`, delivery: 'caller', signal,
           request: {
@@ -93,7 +114,7 @@ export function apply(ctx: Context, config: Config): void {
       },
     })
     signal.throwIfAborted()
-    const route = config.supervisors[0]
+    const route = settings.supervisors[0]
     if (route === undefined) throw new Error('Hierarchy completed without a supervisor route')
     agent.session.append('assistant/message', {
       turn, step, stream: [],
