@@ -182,7 +182,14 @@ export function apply(ctx: Context, config: Config): void {
           } finally {
             if (timeout !== undefined) clearTimeout(timeout)
             signal.removeEventListener('abort', cancel)
-            await activation.dispose()
+            try {
+              await activation.dispose()
+            } catch (error) {
+              const failure = new Error('Hierarchy child disposal failed')
+              failure.name = 'HierarchyPersistenceError'
+              failure.cause = error
+              throw failure
+            }
           }
         } catch (error) {
           errorCategory ??= signal.aborted ? 'cancelled' : startupController.signal.aborted ? 'timeout' : error instanceof Error && error.name === 'HierarchyTimeout' ? 'timeout' : accepted ? 'child_error' : startupFailureCategory(error)
