@@ -24,4 +24,10 @@ describe('content-free invocation diagnostics', () => {
     expect(startupFailureCategory(new Error('quota secret 429'))).toBe('startup_error')
     expect(startupFailureCategory({ name: 'AbortError' })).toBe('cancelled')
   })
+
+  it('falls back from provider capability and response-format incompatibilities', () => {
+    expect(childFailureCategory('error', undefined, 'thinking level MINIMAL is not supported')).toBe('route_unavailable')
+    expect(childFailureCategory('error', undefined, 'failed to render text output: unexpected message role')).toBe('route_unavailable')
+    expect(childFailureCategory('error', undefined, 'Incomplete JSON segment at the end')).toBe('route_unavailable')
+  })
 })

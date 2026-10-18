@@ -37,6 +37,6 @@ export function childFailureCategory(stopReason: string, structured: unknown, di
   // never persist or expose the diagnostic text itself.
   if (/\b(?:401|403)\b|unauthori[sz]ed|forbidden/i.test(diagnostic)) return 'authentication'
   if (/\b429\b|rate.?limit|quota/i.test(diagnostic)) return 'rate_limit'
-  if (/\b(?:404|502|503|504)\b|not.?found|bad.?gateway|service.?unavailable/i.test(diagnostic)) return 'route_unavailable'
+  if (/\b(?:404|502|503|504)\b|not.?found|bad.?gateway|service.?unavailable|unsupported|not supported|cannot be disabled|invalid_argument|invalid_request|failed to render|incomplete json|unexpected message role/i.test(diagnostic)) return 'route_unavailable'
   return 'child_error'
 }

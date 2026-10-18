@@ -136,7 +136,7 @@ export function observeLocalFailure(activation: LocalActivation, wake: () => voi
     activation.failureAt = child.session.seq
     const message = error instanceof Error ? error.message : String(error)
     activation.failureDiagnostic = message.match(
-      /\b(?:401|403|404|429|502|503|504)\b|quota|rate.?limit|unauthori[sz]ed|forbidden|not.?found|service.?unavailable/i,
+      /\b(?:401|403|404|429|502|503|504)\b|quota|rate.?limit|unauthori[sz]ed|forbidden|not.?found|service.?unavailable|unsupported|not supported|cannot be disabled|invalid_argument|invalid_request|failed to render|incomplete json|unexpected message role/i,
     )?.[0]
     wake()
   })

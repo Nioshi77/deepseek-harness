@@ -25,6 +25,7 @@ const config = (workerCount = 2) => {
 }
 function normalResponse(request: Invocation): unknown {
   if (request.prompt.startsWith('Plan this task')) return plan
+  if (request.prompt.startsWith('Answer the user\'s informational request')) return { proposal: 'answer' }
   if (request.prompt.startsWith('Independently inspect the actual')) return approved
   if (request.prompt.startsWith('Independently inspect this assignment')) return { proposal: `proposal from ${request.route.model}` }
   if (request.prompt.startsWith('Compare every candidate')) return agreed()

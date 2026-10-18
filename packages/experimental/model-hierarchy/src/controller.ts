@@ -208,6 +208,14 @@ export async function orchestrate(config: HierarchyConfig, task: string, io: Con
     await io.receipt({ role: 'chief', digest: digest(JSON.stringify(plan)), approved: architecture.approved, feedback: architecture.feedback })
     if (!architecture.approved) throw new Error(`Chief rejected plan: ${architecture.feedback}`)
   }
+  // Informational requests do not need a mutation proposal, worker consensus,
+  // or integration round. A single supervisor answer keeps simple questions
+  // responsive while code, security, and architecture tasks retain the full path.
+  if (plan.answerOnly) {
+    const answer = await call('supervisor', `Answer the user's informational request directly and concisely. Do not modify files or call tools. Request:\n${task}`, proposalSchema)
+    await io.receipt({ role: 'supervisor', digest: digest(answer.proposal), approved: true, feedback: 'answer-only fast path' })
+    return `${answer.proposal}\n\nРуководитель проверил ответ; изменения файлов не выполнялись.`
+  }
   let feedback = ''
   let qualityFailures = 0
   for (let attempt = 0; attempt < config.maxAttempts; attempt++) {
@@ -245,7 +253,6 @@ export async function orchestrate(config: HierarchyConfig, task: string, io: Con
       await io.receipt({ role: 'chief', digest: digest(artifact), approved: chief.approved, feedback: chief.feedback })
       if (!chief.approved) { feedback = chief.feedback; continue }
     }
-    if (plan.answerOnly) return `${artifact}\n\nРуководитель проверил ответ; изменения файлов не выполнялись.`
     const integrated = await call('supervisor', `Integrate only these approved proposals. Preserve unrelated user changes. Run checks appropriate to the change. Report completed=false if integration or verification fails. Task:\n${task}\nApproved proposals SHA256 ${digest(artifact)}:\n${artifact}`, integrationSchema, true)
     if (!integrated.completed) throw new Error(`Integration incomplete: ${integrated.summary}\n${integrated.verification}`)
     const acceptance = await call('supervisor', `Independently inspect the actual integrated files and verify the task is complete. Do not edit. Task:\n${task}\nApproved proposals:\n${artifact}\nReported verification:\n${integrated.verification}`, reviewSchema)
