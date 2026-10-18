@@ -112,6 +112,23 @@ describe('hierarchy controller', () => {
     expect(calls.some(call => call.integrate)).toBe(false)
   })
 
+  it('limits all phases by the configured global invocation concurrency', async () => {
+    const settings = { ...config(), maxParallel: 1 }
+    let active = 0
+    let peak = 0
+    await orchestrate(settings, 'fix', {
+      signal: new AbortController().signal, receipt: async () => {},
+      invoke: async (request) => {
+        active++
+        peak = Math.max(peak, active)
+        await Promise.resolve()
+        active--
+        return normalResponse(request)
+      },
+    })
+    expect(peak).toBe(1)
+  })
+
   it('routes a reported safety risk to the supervisor even with unanimous agreement', async () => {
     const calls: Invocation[] = []
     let assessments = 0

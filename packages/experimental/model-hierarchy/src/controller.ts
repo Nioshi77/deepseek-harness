@@ -68,11 +68,21 @@ class CandidateRejected extends Error {
  * @returns verified integration summary, or rejects without claiming completion.
  */
 export async function orchestrate(config: HierarchyConfig, task: string, io: ControllerIO): Promise<string> {
+  let activeInvocations = 0
+  const waitingInvocations: Array<() => void> = []
+  async function withGlobalConcurrency<T>(operation: () => Promise<T>): Promise<T> {
+    if (activeInvocations >= config.maxParallel) await new Promise<void>(resolve => waitingInvocations.push(resolve))
+    activeInvocations++
+    try { return await operation() } finally {
+      activeInvocations--
+      waitingInvocations.shift()?.()
+    }
+  }
   async function callRoute<T>(role: Role, route: Route, prompt: string, schema: z.ZodType<T>, integrate = false): Promise<T> {
     io.signal.throwIfAborted()
     const outputSchema = providerSchema(z.toJSONSchema(schema))
     if (outputSchema.type !== 'object') throw new Error(`Hierarchy ${role} output schema must be an object`)
-    const output = await io.invoke({ role, route, prompt, schema: { ...outputSchema, type: 'object' }, integrate })
+    const output = await withGlobalConcurrency(() => io.invoke({ role, route, prompt, schema: { ...outputSchema, type: 'object' }, integrate }))
     const parsed = schema.safeParse(output)
     if (!parsed.success) {
       throw new RouteUnavailable(`Route ${route.provider}/${route.model} returned invalid structured output: ${parsed.error.message}`)
