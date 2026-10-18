@@ -200,7 +200,8 @@ describe('Harness hierarchy API feasibility gates', () => {
 describe('hierarchy Host with real child activations', () => {
   it('runs supervisor, worker and review routes and persists receipts before publishing the answer', async () => {
     const scriptedResults = [
-      { tasks: ['answer the question'], architecture: false, security: false, multipleSubsystems: false, finalReview: false, escalate: false },
+      { tasks: ['answer the question'], architecture: false, security: false, multipleSubsystems: false, finalReview: false, escalate: false,
+        needsClarification: false, clarificationQuestion: '' },
       { proposal: 'The answer is 42.' },
       { selectedId: 'P1', approved: true, rationale: 'Only successful proposal is acceptable.', escalate: false },
       { approved: true, feedback: '', escalate: false },

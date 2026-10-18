@@ -3,7 +3,10 @@ import { hierarchyConfig } from '../src/config.ts'
 import { orchestrate, RouteUnavailable } from '../src/controller.ts'
 import type { Invocation, Receipt } from '../src/controller.ts'
 
-const plan = { tasks: ['inspect change'], architecture: false, security: false, multipleSubsystems: false, finalReview: false, escalate: false }
+const plan = {
+  tasks: ['inspect change'], architecture: false, security: false, multipleSubsystems: false,
+  finalReview: false, escalate: false, needsClarification: false, clarificationQuestion: '',
+}
 const approved = { approved: true, feedback: '', escalate: false }
 const agreed = (selectedId = 'P1', safetyRisk = '') => ({ selectedId, agreed: true, rationale: 'best production choice', objections: [], safetyRisk })
 
@@ -79,6 +82,20 @@ describe('hierarchy controller', () => {
       },
     })
     expect(planCalls).toEqual(['manager', 'manager-2'])
+  })
+
+  it('returns a supervisor clarification without dispatching workers or integration', async () => {
+    const calls: Invocation[] = []
+    const result = await orchestrate(config(), 'unclear request', {
+      signal: new AbortController().signal, receipt: async () => {},
+      invoke: async (request) => {
+        calls.push(request)
+        return { ...plan, tasks: [], needsClarification: true, clarificationQuestion: 'Что именно нужно сделать?' }
+      },
+    })
+    expect(result).toBe('Что именно нужно сделать?')
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.role).toBe('supervisor')
   })
 
   it('routes a reported safety risk to the supervisor even with unanimous agreement', async () => {

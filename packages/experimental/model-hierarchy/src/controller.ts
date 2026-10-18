@@ -4,12 +4,17 @@ import { z } from 'zod'
 import type { HierarchyConfig, Route } from './config.ts'
 
 const planSchema = z.object({
-  tasks: z.array(z.string().min(1)).min(1).max(32),
+  tasks: z.array(z.string().min(1)).max(32),
   architecture: z.boolean(),
   security: z.boolean(),
   multipleSubsystems: z.boolean(),
   finalReview: z.boolean(),
   escalate: z.boolean(),
+  needsClarification: z.boolean().default(false),
+  clarificationQuestion: z.string().default(''),
+}).refine(plan => plan.needsClarification || plan.tasks.length > 0, {
+  message: 'A plan must contain tasks unless it explicitly requests clarification',
+  path: ['tasks'],
 })
 const reviewSchema = z.object({ approved: z.boolean(), feedback: z.string(), escalate: z.boolean() })
 const proposalSchema = z.object({ proposal: z.string().min(1) })
@@ -171,7 +176,11 @@ export async function orchestrate(config: HierarchyConfig, task: string, io: Con
     }
     throw new Error('Worker deliberation ended without a decision')
   }
-  const plan = await call('supervisor', `Plan this task. Return independent read-only worker assignments. tasks MUST contain at least one non-empty assignment. Flag architecture, security, multiple subsystems, final project/milestone review, or discretionary escalation. User request:\n${task}`, planSchema)
+  const plan = await call('supervisor', `Plan this task. If the request lacks an actionable objective, set needsClarification=true, put one concise user-facing question in clarificationQuestion, and return tasks=[]. Never ask the user from a child agent. Otherwise return at least one independent read-only worker assignment and needsClarification=false. Flag architecture, security, multiple subsystems, final project/milestone review, or discretionary escalation. User request:\n${task}`, planSchema)
+  if (plan.needsClarification) {
+    const question = plan.clarificationQuestion.trim()
+    return question === '' ? 'Пожалуйста, уточните задачу и ожидаемый результат.' : question
+  }
   let chiefRequired = plan.architecture || plan.security || plan.multipleSubsystems || plan.finalReview || plan.escalate
   if (chiefRequired) {
     const architecture = await call('chief', `Review the proposed plan before execution. Task:\n${task}\nPlan:\n${JSON.stringify(plan)}`, reviewSchema)

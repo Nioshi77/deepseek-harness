@@ -76,7 +76,8 @@ export function apply(ctx: Context, config: Config): void {
     for (const message of messages) agent.session.append('user/message', message, { surfaceOp: 'append' })
     const taskText = messages.flatMap(message => message.content.filter(block => block.type === 'text').map(block => block.text)).join('\n')
     const attachments = messages.flatMap(message => message.content.filter(block => block.type !== 'text'))
-    if (attachments.length === 0 && !/[\p{L}\p{N}]/u.test(taskText)) return next()
+    const meaningfulText = taskText.match(/[\p{L}\p{N}]/gu)?.join('') ?? ''
+    if (attachments.length === 0 && meaningfulText.length < 2) return next()
     const task = taskText.trim() === '' ? 'Analyze the attached user content.' : taskText
     const summary = await orchestrate(settings, task, {
       signal,
