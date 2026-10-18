@@ -55,6 +55,9 @@ export interface ControllerIO {
 
 /** Provider failure eligible for the next confirmed route, never a quality rejection. */
 export class RouteUnavailable extends Error {}
+function isPersistenceFailure(error: unknown): boolean {
+  return error instanceof Error && error.name === 'HierarchyPersistenceError'
+}
 
 /** Read-only candidate rejection can be repaired within the quality attempt budget. */
 class CandidateRejected extends Error {
@@ -118,6 +121,7 @@ export async function orchestrate(config: HierarchyConfig, task: string, io: Con
           return { id, route, proposal: result.proposal }
         } catch (error) {
           io.signal.throwIfAborted()
+          if (isPersistenceFailure(error)) throw error
           await io.receipt({ role: 'worker', digest: digest(`${assignment}\n${route.provider}/${route.model}`), approved: false, feedback: `Proposal failed for ${route.provider}/${route.model}: ${errorMessage(error)}` })
           return undefined
         }
@@ -166,6 +170,7 @@ export async function orchestrate(config: HierarchyConfig, task: string, io: Con
             assessment = await callRoute('worker', participant.route, `Compare every candidate using this production-readiness rubric: correctness and completeness; security and data-loss risk; stability and failure handling; testability; maintainability and architectural compatibility; rollback and observability where relevant. Select one candidate ID. agreed=true means you can support it as the group decision. State concrete objections and put any security or data-loss concern in safetyRisk. This is consensus round ${round} of 2.\nTask:\n${task}\nAssignment:\n${assignment}\nCandidates:\n${proposalText}\nPrior round decisions:\n${prior}`, deliberationSchema)
           } catch (error) {
             io.signal.throwIfAborted()
+            if (isPersistenceFailure(error)) throw error
             await io.receipt({ role: 'worker', digest: digest(`${proposalText}\n${participant.id}`), approved: false, feedback: `Peer assessment failed in round ${round} for ${participant.route.provider}/${participant.route.model}: ${errorMessage(error)}` })
             return undefined
           }

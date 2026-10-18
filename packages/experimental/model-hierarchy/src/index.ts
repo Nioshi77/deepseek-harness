@@ -94,7 +94,14 @@ export function apply(ctx: Context, config: Config): void {
       signal,
       async receipt(receipt) {
         appendPluginRecord(agent.session, 'plugin:model-hierarchy/receipt', { ...receipt, turn })
-        await ctx.sessions.flush(agent.session)
+        try {
+          await ctx.sessions.flush(agent.session)
+        } catch (error) {
+          const failure = new Error('Hierarchy evidence persistence failed')
+          failure.name = 'HierarchyPersistenceError'
+          failure.cause = error
+          throw failure
+        }
       },
       async invoke(request) {
         const evidence = {
@@ -154,7 +161,14 @@ export function apply(ctx: Context, config: Config): void {
             durationMs: Math.round(performance.now() - started),
             ...(errorCategory === undefined ? {} : { errorCategory }),
           })
-          await ctx.sessions.flush(agent.session)
+          try {
+            await ctx.sessions.flush(agent.session)
+          } catch (error) {
+            const failure = new Error('Hierarchy evidence persistence failed')
+            failure.name = 'HierarchyPersistenceError'
+            failure.cause = error
+            throw failure
+          }
         }
       },
     })
