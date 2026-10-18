@@ -51,18 +51,34 @@ export const Config = hierarchyConfig
  */
 export function apply(ctx: Context, config: Config): void {
   let activeInvocations = 0
-  const waitingInvocations: Array<() => void> = []
+  const waitingInvocations: Array<() => boolean> = []
   async function acquireInvocation(signal: AbortSignal): Promise<() => void> {
     const limit = Math.max(1, config.maxParallel)
     while (activeInvocations >= limit) {
       await new Promise<void>((resolve, reject) => {
-        const cancel = () => { signal.removeEventListener('abort', cancel); reject(signal.reason ?? new DOMException('Aborted', 'AbortError')) }
+        let cancelled = false
+        const cancel = () => {
+          cancelled = true
+          signal.removeEventListener('abort', cancel)
+          reject(signal.reason ?? new DOMException('Aborted', 'AbortError'))
+        }
         signal.addEventListener('abort', cancel, { once: true })
-        waitingInvocations.push(() => { signal.removeEventListener('abort', cancel); resolve() })
+        waitingInvocations.push(() => {
+          if (cancelled) return false
+          signal.removeEventListener('abort', cancel)
+          resolve()
+          return true
+        })
       })
     }
     activeInvocations++
-    return () => { activeInvocations--; waitingInvocations.shift()?.() }
+    return () => {
+      activeInvocations--
+      while (waitingInvocations.length > 0) {
+        const next = waitingInvocations.shift()
+        if (next === undefined || next()) break
+      }
+    }
   }
   const currentConfig = (): HierarchyConfig => ({
     ...config,
@@ -175,30 +191,32 @@ export function apply(ctx: Context, config: Config): void {
           }
           throw error
         } finally {
-          appendPluginRecord(agent.session, 'plugin:model-hierarchy/invocation', {
-            ...evidence, state: errorCategory === undefined ? 'completed' : 'failed',
-            durationMs: Math.round(performance.now() - started),
-            ...(errorCategory === undefined ? {} : { errorCategory }),
-          })
           try {
+            appendPluginRecord(agent.session, 'plugin:model-hierarchy/invocation', {
+              ...evidence, state: errorCategory === undefined ? 'completed' : 'failed',
+              durationMs: Math.round(performance.now() - started),
+              ...(errorCategory === undefined ? {} : { errorCategory }),
+            })
             await ctx.sessions.flush(agent.session)
           } catch (error) {
             const failure = new Error('Hierarchy evidence persistence failed')
             failure.name = 'HierarchyPersistenceError'
             failure.cause = error
             throw failure
+          } finally {
+            clearTimeout(startupTimeout)
+            releaseInvocation()
           }
-          clearTimeout(startupTimeout)
-          releaseInvocation()
         }
       },
     })
     signal.throwIfAborted()
-    const route = settings.supervisors[0]
-    if (route === undefined) throw new Error('Hierarchy completed without a supervisor route')
     agent.session.append('assistant/message', {
       turn, step, stream: [],
-      message: createAssistantMessage({ content: [{ type: 'text', text: summary }], source: { provider: route.provider, model: route.model } }),
+      // The final text is synthesized by the hierarchy controller; do not
+      // attribute it to the first configured supervisor when fallback routing
+      // or multiple workers actually produced the result.
+      message: createAssistantMessage({ content: [{ type: 'text', text: summary }], source: { provider: 'model-hierarchy', model: 'controller' } }),
     }, { surfaceOp: 'append' })
     await ctx.sessions.flush(agent.session)
     return { kind: 'enter', messages: [] }
