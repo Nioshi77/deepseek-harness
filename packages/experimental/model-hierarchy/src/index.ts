@@ -50,6 +50,20 @@ export const Config = hierarchyConfig
  * @param config - validated hierarchy settings.
  */
 export function apply(ctx: Context, config: Config): void {
+  let activeInvocations = 0
+  const waitingInvocations: Array<() => void> = []
+  async function acquireInvocation(signal: AbortSignal): Promise<() => void> {
+    const limit = Math.max(1, config.maxParallel)
+    while (activeInvocations >= limit) {
+      await new Promise<void>((resolve, reject) => {
+        const cancel = () => { signal.removeEventListener('abort', cancel); reject(signal.reason ?? new DOMException('Aborted', 'AbortError')) }
+        signal.addEventListener('abort', cancel, { once: true })
+        waitingInvocations.push(() => { signal.removeEventListener('abort', cancel); resolve() })
+      })
+    }
+    activeInvocations++
+    return () => { activeInvocations--; waitingInvocations.shift()?.() }
+  }
   const currentConfig = (): HierarchyConfig => ({
     ...config,
     enabled: config.enabled.get(),
@@ -104,6 +118,7 @@ export function apply(ctx: Context, config: Config): void {
         }
       },
       async invoke(request) {
+        const releaseInvocation = await acquireInvocation(signal)
         const evidence = {
           turn, invocation: ++invocation, role: request.role, provider: request.route.provider, model: request.route.model,
         }
@@ -111,12 +126,15 @@ export function apply(ctx: Context, config: Config): void {
         appendPluginRecord(agent.session, 'plugin:model-hierarchy/invocation', { ...evidence, state: 'attempted' })
         let errorCategory: FailureCategory | undefined
         let accepted = false
+        const startupController = new AbortController()
+        const startupTimeout = setTimeout(() => startupController.abort(new Error('Hierarchy child startup deadline exceeded')), settings.invocationTimeoutMs)
+        const childSignal = AbortSignal.any([signal, startupController.signal])
         try {
           const preset = request.role === 'worker'
             ? settings.workerPreset
             : request.role === 'chief' ? settings.chiefPreset : settings.supervisorPreset
           const activation = await ctx.subagents.startActivation({
-            provider: 'spawn', label: `Hierarchy: ${request.role}`, delivery: 'caller', signal,
+            provider: 'spawn', label: `Hierarchy: ${request.role}`, delivery: 'caller', signal: childSignal,
             request: {
               parent: agent, agentPreset: preset, maxDepth: 1,
               prompt: [{ type: 'text', text: request.prompt }, ...attachments],
@@ -131,6 +149,7 @@ export function apply(ctx: Context, config: Config): void {
             },
           })
           accepted = true
+          clearTimeout(startupTimeout)
           const cancel = () => { void activation.dispose().catch(() => { /* Result/disposal below owns reporting. */ }) }
           signal.addEventListener('abort', cancel, { once: true })
           let timeout: ReturnType<typeof setTimeout> | undefined
@@ -150,7 +169,7 @@ export function apply(ctx: Context, config: Config): void {
             await activation.dispose()
           }
         } catch (error) {
-          errorCategory ??= signal.aborted ? 'cancelled' : error instanceof Error && error.name === 'HierarchyTimeout' ? 'timeout' : accepted ? 'child_error' : startupFailureCategory(error)
+          errorCategory ??= signal.aborted ? 'cancelled' : startupController.signal.aborted ? 'timeout' : error instanceof Error && error.name === 'HierarchyTimeout' ? 'timeout' : accepted ? 'child_error' : startupFailureCategory(error)
           if (['authentication', 'rate_limit', 'route_unavailable'].includes(errorCategory)) {
             throw new RouteUnavailable(`Route ${request.route.provider}/${request.route.model}: ${errorCategory}`)
           }
@@ -169,6 +188,8 @@ export function apply(ctx: Context, config: Config): void {
             failure.cause = error
             throw failure
           }
+          clearTimeout(startupTimeout)
+          releaseInvocation()
         }
       },
     })
