@@ -921,7 +921,7 @@ export class SubagentManager {
           setup,
         })
 
-      resource = { kind: 'local', handle, outputStart: handle.agent.session.seq, structured, failureAt: undefined, poke: Promise.withResolvers<void>() }
+      resource = { kind: 'local', handle, outputStart: handle.agent.session.seq, structured, failureAt: undefined, failureDiagnostic: undefined, poke: Promise.withResolvers<void>() }
     }
     const observer = this.host.observeActivation(provider, childId, parent)
 
