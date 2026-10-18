@@ -23,6 +23,7 @@ export interface HierarchyConfig {
   chiefPreset: string
   maxAttempts: number
   maxParallel: number
+  invocationTimeoutMs: number
   readTools: string[]
 }
 
@@ -47,5 +48,6 @@ export const hierarchyConfig: z<HierarchyConfig> = z.object({
   chiefPreset: z.string().default('standard'),
   maxAttempts: z.number().step(1).min(2).max(10).default(3),
   maxParallel: z.number().step(1).min(1).max(8).default(3),
+  invocationTimeoutMs: z.number().step(1000).min(5000).max(600000).default(120000),
   readTools: z.array(z.string()).default(['read', 'read_file', 'glob', 'grep', 'list_directory', 'search', 'structured_output']),
 })

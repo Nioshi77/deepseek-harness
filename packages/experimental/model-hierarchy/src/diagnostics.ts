@@ -11,7 +11,7 @@ export interface InvocationOutcome {
 }
 
 /** Stable categories deliberately exclude raw provider errors and child content. */
-export type FailureCategory = 'authentication' | 'rate_limit' | 'route_unavailable' | 'cancelled' | 'token_limit' | 'refusal' | 'invalid_output' | 'child_error' | 'startup_error'
+export type FailureCategory = 'authentication' | 'rate_limit' | 'route_unavailable' | 'cancelled' | 'timeout' | 'token_limit' | 'refusal' | 'invalid_output' | 'child_error' | 'startup_error'
 
 /** Only explicit HTTP status evidence establishes provider unavailability. */
 export function startupFailureCategory(error: unknown): FailureCategory {

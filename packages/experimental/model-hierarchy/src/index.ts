@@ -126,19 +126,24 @@ export function apply(ctx: Context, config: Config): void {
           accepted = true
           const cancel = () => { void activation.dispose().catch(() => { /* Result/disposal below owns reporting. */ }) }
           signal.addEventListener('abort', cancel, { once: true })
+          let timeout: ReturnType<typeof setTimeout> | undefined
           try {
             if (signal.aborted) { await activation.dispose(); signal.throwIfAborted() }
-            const result = await activation.result
+            const deadline = new Promise<never>((_, reject) => {
+              timeout = setTimeout(() => reject(Object.assign(new Error('Hierarchy child deadline exceeded'), { name: 'HierarchyTimeout' })), settings.invocationTimeoutMs)
+            })
+            const result = await Promise.race([activation.result, deadline])
             signal.throwIfAborted()
             errorCategory = childFailureCategory(result.stopReason, result.structured, result.diagnostic)
             if (errorCategory !== undefined) throw new Error(`Hierarchy child ${request.role} failed: ${errorCategory}`)
             return result.structured
           } finally {
+            if (timeout !== undefined) clearTimeout(timeout)
             signal.removeEventListener('abort', cancel)
             await activation.dispose()
           }
         } catch (error) {
-          errorCategory ??= signal.aborted ? 'cancelled' : accepted ? 'child_error' : startupFailureCategory(error)
+          errorCategory ??= signal.aborted ? 'cancelled' : error instanceof Error && error.name === 'HierarchyTimeout' ? 'timeout' : accepted ? 'child_error' : startupFailureCategory(error)
           if (['authentication', 'rate_limit', 'route_unavailable'].includes(errorCategory)) {
             throw new RouteUnavailable(`Route ${request.route.provider}/${request.route.model}: ${errorCategory}`)
           }
