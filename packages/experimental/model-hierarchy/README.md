@@ -2,7 +2,7 @@
 
 This experimental Host and Web plugin routes a root turn through confirmed model tiers. The header editor uses Harness model catalog entries; provider and model names are configuration, not hardcoded capability claims.
 
-The supervisor plans independent assignments, read-only workers propose changes, and a supervisor reviews proposals before a separate supervisor activation integrates them and runs checks. Another read-only supervisor activation inspects the integrated result. Architecture, security, multiple-subsystem changes, project completion, discretionary escalation and two rejected attempts require the chief. Independent worker assignments run in bounded batches. Unavailable workers fall back through confirmed worker routes and then supervisor routes, without a monetary ceiling.
+The supervisor plans independent assignments. For every assignment, every available read-only worker produces an independent candidate, then the successful workers compare all candidates against a production-readiness rubric covering correctness, security, stability, testability, maintainability, compatibility, rollback and observability. A candidate proceeds when all participating workers support it. Workers get at most two consensus rounds; deadlocks, a single successful worker, and reported security or data-loss risks go to the supervisor for a recorded decision. A separate supervisor activation integrates the selected proposals and runs checks, and another read-only supervisor activation inspects the result. Architecture, security, multiple-subsystem changes, project completion, discretionary escalation and two rejected attempts require the chief. Worker calls run in bounded batches. Unavailable workers do not block the remaining comparison; when every worker route is unavailable, execution falls back to confirmed supervisor routes without a monetary ceiling.
 
 ## Configuration
 
@@ -10,7 +10,7 @@ Install the plugin as entry `model-hierarchy`. `enabled` defaults to true; `conf
 
 ## Model Experience
 
-The root model is bypassed. Each ordinary task makes a planning call, at least one worker call, a proposal review, an integration activation and an independent acceptance review. Chief review adds calls only when required. Each child has a fresh context containing the task and relevant proposals; independent children do not share a KV cache. Worker and reviewer tool guards enforce read-only access, while the integration activation retains normal Harness tool approval and sandbox policies.
+The root model is bypassed. Each ordinary task makes a planning call, one independent proposal call per usable worker and assignment, up to two peer-assessment rounds, a proposal review, an integration activation and an independent acceptance review. Supervisor selection adds a call for deadlock, single-success, or safety-risk cases. Chief review adds calls only when required. Each child has a fresh context containing the task and relevant proposals; independent children do not share a KV cache. Worker and reviewer tool guards enforce read-only access, while the integration activation retains normal Harness tool approval and sandbox policies. Receipts record peer assessments and supervisor decisions without exposing hidden reasoning.
 
 ## Known Limitations and Deferred Work
 

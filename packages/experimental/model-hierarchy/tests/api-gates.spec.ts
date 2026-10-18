@@ -202,6 +202,7 @@ describe('hierarchy Host with real child activations', () => {
     const scriptedResults = [
       { tasks: ['answer the question'], architecture: false, security: false, multipleSubsystems: false, finalReview: false, escalate: false },
       { proposal: 'The answer is 42.' },
+      { selectedId: 'P1', approved: true, rationale: 'Only successful proposal is acceptable.', escalate: false },
       { approved: true, feedback: '', escalate: false },
       { completed: true, summary: 'The answer is 42.', verification: 'Checked the answer.' },
       { approved: true, feedback: '', escalate: false },
@@ -209,15 +210,15 @@ describe('hierarchy Host with real child activations', () => {
     const { ctx, parent, adapter } = await composedHarness(scriptedResults.map((result, index) => toolCallResponse(`result-${index}`, STRUCTURED_OUTPUT_TOOL, result)))
     parent.followup(createUserMessage({ content: [{ type: 'text', text: 'What is the answer?' }], source: { kind: 'user' } }))
     await parent.whenIdle()
-    expect(adapter.requests.map(request => request.model)).toEqual(['supervisor', 'worker', 'supervisor', 'supervisor', 'supervisor'])
+    expect(adapter.requests.map(request => request.model)).toEqual(['supervisor', 'worker', 'supervisor', 'supervisor', 'supervisor', 'supervisor'])
     const events = parent.session.snapshotEvents()
     const answer = events.findIndex(event => event.type === 'assistant/message')
     const receipts = events.flatMap((event, index) => event.type === 'hierarchy/receipt' ? [index] : [])
-    expect(receipts).toHaveLength(2)
+    expect(receipts).toHaveLength(3)
     expect(receipts.every(index => index < answer)).toBe(true)
     await ctx.sessions.flush(parent.session)
     const stored = await loadStoredSession(ctx.sessionPersistence, parent.id)
-    expect(stored.events.filter(event => event.type === 'hierarchy/receipt')).toHaveLength(2)
+    expect(stored.events.filter(event => event.type === 'hierarchy/receipt')).toHaveLength(3)
     expect(parent.session.deriveMessages().at(-1)?.content).toEqual([{ type: 'text', text: 'The answer is 42.\n\nChecked the answer.' }])
   })
 })
