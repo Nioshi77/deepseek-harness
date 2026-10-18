@@ -4,6 +4,7 @@ import { childFailureCategory, startupFailureCategory } from '../src/diagnostics
 describe('content-free invocation diagnostics', () => {
   it('does not mislabel generic child failures or refusals as unavailable routes', () => {
     expect(childFailureCategory('error', undefined)).toBe('child_error')
+    expect(childFailureCategory('error', undefined, 'provider internal failure')).toBe('child_error')
     expect(childFailureCategory('refusal', undefined)).toBe('refusal')
     expect(childFailureCategory('max-tokens', undefined)).toBe('token_limit')
     expect(childFailureCategory('aborted', undefined)).toBe('cancelled')
@@ -15,6 +16,8 @@ describe('content-free invocation diagnostics', () => {
   })
 
   it('classifies explicit provider status without copying error content', () => {
+    expect(childFailureCategory('error', undefined, 'HTTP 429 quota exceeded')).toBe('rate_limit')
+    expect(childFailureCategory('error', undefined, 'HTTP 503 service unavailable')).toBe('route_unavailable')
     expect(startupFailureCategory({ status: 401, message: 'secret' })).toBe('authentication')
     expect(startupFailureCategory({ statusCode: 429 })).toBe('rate_limit')
     expect(startupFailureCategory({ status: 503 })).toBe('route_unavailable')

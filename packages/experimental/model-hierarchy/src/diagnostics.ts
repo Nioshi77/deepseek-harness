@@ -27,10 +27,16 @@ export function startupFailureCategory(error: unknown): FailureCategory {
 }
 
 /** A generic child failure is not evidence that its model route is unavailable. */
-export function childFailureCategory(stopReason: string, structured: unknown): FailureCategory | undefined {
+export function childFailureCategory(stopReason: string, structured: unknown, diagnostic = ''): FailureCategory | undefined {
   if (stopReason === 'completed') return structured === undefined ? 'invalid_output' : undefined
   if (stopReason === 'aborted') return 'cancelled'
   if (stopReason === 'max-tokens') return 'token_limit'
   if (stopReason === 'refusal') return 'refusal'
+  // Providers report accepted-run failures through a bounded diagnostic rather
+  // than throwing at startup. Use only stable status markers for fallback;
+  // never persist or expose the diagnostic text itself.
+  if (/\b(?:401|403)\b|unauthori[sz]ed|forbidden/i.test(diagnostic)) return 'authentication'
+  if (/\b429\b|rate.?limit|quota/i.test(diagnostic)) return 'rate_limit'
+  if (/\b(?:404|502|503|504)\b|not.?found|bad.?gateway|service.?unavailable/i.test(diagnostic)) return 'route_unavailable'
   return 'child_error'
 }

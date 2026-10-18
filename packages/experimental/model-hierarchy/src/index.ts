@@ -130,7 +130,7 @@ export function apply(ctx: Context, config: Config): void {
             if (signal.aborted) { await activation.dispose(); signal.throwIfAborted() }
             const result = await activation.result
             signal.throwIfAborted()
-            errorCategory = childFailureCategory(result.stopReason, result.structured)
+            errorCategory = childFailureCategory(result.stopReason, result.structured, result.diagnostic)
             if (errorCategory !== undefined) throw new Error(`Hierarchy child ${request.role} failed: ${errorCategory}`)
             return result.structured
           } finally {
