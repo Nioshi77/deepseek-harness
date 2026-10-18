@@ -120,7 +120,9 @@ export function apply(ctx: Context, config: Config): void {
       ).map(route => ({ role, provider: route.provider, model: route.model }))),
     })
     let invocation = 0
-    const summary = await orchestrate(settings, task, {
+    let summary: string
+    try {
+      summary = await orchestrate(settings, task, {
       signal,
       async receipt(receipt) {
         appendPluginRecord(agent.session, 'plugin:model-hierarchy/receipt', { ...receipt, turn })
@@ -216,7 +218,15 @@ export function apply(ctx: Context, config: Config): void {
           }
         }
       },
-    })
+      })
+    } catch (error) {
+      signal.throwIfAborted()
+      if (error instanceof Error && error.name === 'HierarchyPersistenceError') throw error
+      const reason = error instanceof RouteUnavailable
+        ? 'Все выбранные маршруты моделей недоступны или несовместимы с этой задачей.'
+        : 'Иерархия не смогла получить структурированный ответ от выбранных моделей.'
+      summary = `${reason}\n\nОтвет не был сгенерирован; изменения файлов не выполнялись.`
+    }
     signal.throwIfAborted()
     agent.session.append('assistant/message', {
       turn, step, stream: [],
